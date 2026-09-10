@@ -1,0 +1,234 @@
+name: Build Programa All Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - feature/unificacao-windows
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout Programa All
+        uses: actions/checkout@v4
+
+      - name: Preparar diretórios
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path sources | Out-Null
+          New-Item -ItemType Directory -Force -Path staging/modules | Out-Null
+
+      - name: Clonar os seis projetos originais
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/tysudess/noticias-monitor.git sources/noticias-monitor
+          git clone --depth 1 https://github.com/tysudess/extrator-video-windows.git sources/extrator-video-windows
+          git clone --depth 1 https://github.com/tysudess/Extrator-de-noticias-windows.git sources/extrator-noticias
+          git clone --depth 1 https://github.com/tysudess/automa-o-planilhas.git sources/planilhas
+          git clone --depth 1 https://github.com/tysudess/EditorPDF-Windows-v0.1-PROJETO1.git sources/editor-pdf
+          git clone --depth 1 https://github.com/tysudess/capas-windows-portable.git sources/capas
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Gradle 8.10.2
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Compilar Monitor de Notícias
+        shell: pwsh
+        working-directory: sources/noticias-monitor
+        run: |
+          gradle :desktop:createDistributable --stacktrace
+          $src = "desktop/build/compose/binaries/main/app"
+          if (!(Test-Path $src)) { throw "Distribuição do Monitor de Notícias não encontrada" }
+          Copy-Item $src "../../staging/modules/monitor" -Recurse -Force
+
+      - name: Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Compilar Extrator de Notícias
+        shell: pwsh
+        working-directory: sources/extrator-noticias
+        run: |
+          npm install --no-audit --no-fund
+          node --check main.js
+          node --check preload.js
+          node --check renderer/renderer.js
+          npm run dist
+          $exe = Get-ChildItem dist -Filter "ExtratorMateriasPortable*.exe" | Select-Object -First 1
+          if (!$exe) { throw "Extrator de Notícias não foi gerado" }
+          New-Item -ItemType Directory -Force -Path "../../staging/modules/noticias" | Out-Null
+          Copy-Item $exe.FullName "../../staging/modules/noticias/$($exe.Name)" -Force
+
+      - name: Compilar Automação de Planilhas
+        shell: pwsh
+        working-directory: sources/planilhas
+        run: |
+          npm install --no-audit --no-fund
+          node --check main.js
+          node --check preload.js
+          node --check renderer/renderer.js
+          node --check engine/index.js
+          npm run dist
+          $exe = Get-ChildItem dist -Filter "AutomacaoPlanilhas*.exe" | Select-Object -First 1
+          if (!$exe) { throw "Automação de Planilhas não foi gerada" }
+          New-Item -ItemType Directory -Force -Path "../../staging/modules/planilhas" | Out-Null
+          Copy-Item $exe.FullName "../../staging/modules/planilhas/$($exe.Name)" -Force
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compilar Extrator de Vídeos com entrada Download/Editor
+        shell: pwsh
+        working-directory: sources/extrator-video-windows
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.exe" -OutFile "bin/yt-dlp.exe"
+          Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile "bin/yt-dlp-stable.exe"
+          Invoke-WebRequest -Uri "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip" -OutFile "deno.zip"
+          Expand-Archive deno.zip deno-temp -Force
+          Copy-Item "deno-temp/deno.exe" "bin/deno.exe" -Force
+
+          $ffmpegUrls = @(
+            "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-n9.0-latest-win64-gpl-9.0.zip",
+            "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          )
+          $ok = $false
+          foreach ($url in $ffmpegUrls) {
+            try {
+              Invoke-WebRequest -Uri $url -OutFile "ffmpeg.zip" -TimeoutSec 180
+              if ((Get-Item "ffmpeg.zip").Length -gt 1000000) { $ok = $true; break }
+            } catch { Write-Warning $_.Exception.Message }
+          }
+          if (!$ok) { throw "Não foi possível baixar FFmpeg" }
+          Expand-Archive ffmpeg.zip ffmpeg-temp -Force
+          Copy-Item (Get-ChildItem ffmpeg-temp -Recurse -Filter ffmpeg.exe | Select-Object -First 1).FullName "bin/ffmpeg.exe" -Force
+          Copy-Item (Get-ChildItem ffmpeg-temp -Recurse -Filter ffprobe.exe | Select-Object -First 1).FullName "bin/ffprobe.exe" -Force
+
+          @'
+          import sys
+          import refined_layout_v301 as app301
+
+          mode = 'download'
+          for arg in sys.argv[1:]:
+              if arg.startswith('--programa-all-mode='):
+                  mode = arg.split('=', 1)[1].strip().lower()
+
+          previous_build_ui = app301.core.MainWindow._build_ui
+
+          def programa_all_build_ui(self):
+              previous_build_ui(self)
+              try:
+                  index = 1 if mode == 'editor' else 0
+                  self.ref_stack.setCurrentIndex(index)
+                  if hasattr(self, 'ref_nav'):
+                      key = 'editor' if mode == 'editor' else 'download'
+                      if key in self.ref_nav:
+                          self.ref_nav[key].setChecked(True)
+              except Exception:
+                  pass
+
+          app301.core.MainWindow._build_ui = programa_all_build_ui
+          app301.main()
+          '@ | Set-Content -Encoding UTF8 programa_all_video.py
+
+          python -m py_compile programa_all_video.py
+          pyinstaller --noconfirm --clean --windowed --onedir --name ExtratorVideos --contents-directory _internal --icon "ExtratorVideos-Icone.ico" programa_all_video.py
+          Copy-Item bin "dist/ExtratorVideos/bin" -Recurse -Force
+          Copy-Item "ExtratorVideos-Icone.ico" "dist/ExtratorVideos/ExtratorVideos-Icone.ico" -Force
+          if (Test-Path "LEIA-ME.txt") { Copy-Item "LEIA-ME.txt" "dist/ExtratorVideos/LEIA-ME.txt" -Force }
+          New-Item -ItemType Directory -Force -Path "dist/ExtratorVideos/Videos" | Out-Null
+          Copy-Item "dist/ExtratorVideos" "../../staging/modules/video" -Recurse -Force
+
+      - name: Compilar Editor de PDF
+        shell: pwsh
+        working-directory: sources/editor-pdf
+        run: |
+          python patch_v031.py
+          python -m pip install -r requirements.txt
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name "Editor-de-PDF" --icon "assets/editor_pdf_icon.ico" --add-data "assets/capa_padrao.png;assets" --add-data "assets/editor_pdf_icon.png;assets" --collect-all PySide6 main.py
+          New-Item -ItemType Directory -Force -Path "../../staging/modules/pdf" | Out-Null
+          Copy-Item "dist/Editor-de-PDF.exe" "../../staging/modules/pdf/Editor-de-PDF.exe" -Force
+          Copy-Item "assets/capa_padrao.png" "../../staging/modules/pdf/CAPA-PADRAO.png" -Force
+
+      - name: Python 3.11 para Principais Capas
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Compilar Principais Capas
+        shell: pwsh
+        working-directory: sources/capas
+        run: |
+          python scripts/apply_windows_parity_v1_2_5.py
+          python scripts/apply_windows_connectivity_v1_2_6.py
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          choco install tesseract -y --no-progress
+          New-Item -ItemType Directory -Force -Path vendor/tesseract | Out-Null
+          Copy-Item "C:/Program Files/Tesseract-OCR/*" vendor/tesseract -Recurse -Force
+          Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata_fast/raw/main/por.traineddata" -OutFile "vendor/tesseract/tessdata/por.traineddata"
+          pyinstaller --noconfirm --clean PrincipaisCapas.spec
+          if (!(Test-Path "dist/PrincipaisCapas-Portable")) { throw "Principais Capas não foi gerado" }
+          Copy-Item "dist/PrincipaisCapas-Portable" "../../staging/modules/capas" -Recurse -Force
+
+      - name: Verificar todos os módulos
+        shell: pwsh
+        run: |
+          $checks = @(
+            "staging/modules/monitor",
+            "staging/modules/video/ExtratorVideos.exe",
+            "staging/modules/noticias",
+            "staging/modules/planilhas",
+            "staging/modules/pdf/Editor-de-PDF.exe",
+            "staging/modules/capas/PrincipaisCapas.exe"
+          )
+          foreach ($p in $checks) { if (!(Test-Path $p)) { throw "Módulo ausente: $p" } }
+
+      - name: Instalar dependências do shell
+        shell: pwsh
+        run: npm install --no-audit --no-fund
+
+      - name: Gerar instalador único Programa All
+        shell: pwsh
+        run: npm run dist
+
+      - name: Montar versão portátil em ZIP
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist -Filter "ProgramaAll-Setup-*.exe" | Select-Object -First 1
+          if (!$setup) { throw "Instalador Programa All não foi gerado" }
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item $setup.FullName package/ -Force
+          Copy-Item README.md package/README.md -Force
+          Compress-Archive -Path package/* -DestinationPath ProgramaAll-Windows-v1.0.0.zip -Force
+
+      - name: Publicar artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProgramaAll-Windows-v1.0.0
+          path: |
+            dist/ProgramaAll-Setup-*.exe
+            ProgramaAll-Windows-v1.0.0.zip
+          if-no-files-found: error
+          retention-days: 30
