@@ -209,26 +209,32 @@ jobs:
         shell: pwsh
         run: npm install --no-audit --no-fund
 
-      - name: Gerar instalador único Programa All
+      - name: Gerar Programa All para Windows
         shell: pwsh
         run: npm run dist -- --publish never
 
-      - name: Montar versão portátil em ZIP
+      - name: Montar Windows Portable real
         shell: pwsh
         run: |
-          $setup = Get-ChildItem dist -Filter "ProgramaAll-Setup-*.exe" | Select-Object -First 1
-          if (!$setup) { throw "Instalador Programa All não foi gerado" }
-          New-Item -ItemType Directory -Force -Path package | Out-Null
-          Copy-Item $setup.FullName package/ -Force
-          Copy-Item README.md package/README.md -Force
-          Compress-Archive -Path package/* -DestinationPath ProgramaAll-Windows-v1.0.0.zip -Force
+          $portableDir = "dist/win-unpacked"
+          if (!(Test-Path $portableDir)) { throw "Pasta win-unpacked do Programa All não foi gerada" }
+          if (!(Test-Path "$portableDir/Programa All.exe")) { throw "Executável portable Programa All.exe não foi encontrado" }
+          if (!(Test-Path "$portableDir/resources/modules")) { throw "Módulos não foram incluídos na versão portable" }
 
-      - name: Publicar artefato
+          $portableRoot = "package/ProgramaAll-Windows-Portable-v1.0.0"
+          New-Item -ItemType Directory -Force -Path $portableRoot | Out-Null
+          Copy-Item "$portableDir/*" $portableRoot -Recurse -Force
+          Copy-Item README.md "$portableRoot/README.md" -Force
+
+          Compress-Archive -Path $portableRoot -DestinationPath "ProgramaAll-Windows-Portable-v1.0.0.zip" -Force
+          if (!(Test-Path "ProgramaAll-Windows-Portable-v1.0.0.zip")) { throw "ZIP portable não foi criado" }
+
+      - name: Publicar artefatos Windows
         uses: actions/upload-artifact@v4
         with:
           name: ProgramaAll-Windows-v1.0.0
           path: |
             dist/ProgramaAll-Setup-*.exe
-            ProgramaAll-Windows-v1.0.0.zip
+            ProgramaAll-Windows-Portable-v1.0.0.zip
           if-no-files-found: error
           retention-days: 30
