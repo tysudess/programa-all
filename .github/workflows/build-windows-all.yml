@@ -211,7 +211,7 @@ jobs:
 
       - name: Gerar instalador único Programa All
         shell: pwsh
-        run: npm run dist
+        run: npm run dist -- --publish never
 
       - name: Montar versão portátil em ZIP
         shell: pwsh
