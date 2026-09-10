@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Programa All</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">A</div>
+        <div><strong>Programa All</strong><span>Central Windows</span></div>
+      </div>
+      <nav id="nav"></nav>
+      <div class="sidebar-foot">Todos os módulos em um só lugar</div>
+    </aside>
+
+    <main class="content">
+      <header>
+        <div>
+          <span class="eyebrow">CENTRAL DE FERRAMENTAS</span>
+          <h1 id="pageTitle">Programa All</h1>
+          <p id="pageDescription">Selecione um módulo na barra lateral.</p>
+        </div>
+        <span id="statusPill" class="pill">Verificando módulos…</span>
+      </header>
+
+      <section class="hero">
+        <div>
+          <h2 id="moduleTitle">Seus programas Windows, reunidos</h2>
+          <p id="moduleText">O Programa All preserva os motores originais e organiza o acesso em uma interface única.</p>
+        </div>
+        <div class="actions">
+          <button id="launchBtn" class="primary" disabled>Abrir módulo</button>
+          <button id="folderBtn" class="secondary" disabled>Abrir pasta</button>
+        </div>
+      </section>
+
+      <section class="grid" id="moduleGrid"></section>
+      <div id="message" class="message hidden"></div>
+    </main>
+  </div>
+  <script src="renderer.js"></script>
+</body>
+</html>
